@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zixcord - Admin Panel</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0b0f19; color: #f8fafc; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 12px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .card img { max-width: 150px; border-radius: 8px; margin-top: 10px; display: block; }
+        .btn-danger { background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-danger:hover { background: #dc2626; }
+        input { padding: 12px; width: 100%; margin-bottom: 15px; border-radius: 8px; border: none; box-sizing: border-box; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 style="color: #6366f1;">Zixcord Admin Trash</h1>
+    
+    <!-- Login Section -->
+    <div id="login-section">
+        <p>Login to access deleted messages.</p>
+        <input type="email" id="admin-email" placeholder="Email">
+        <input type="password" id="admin-password" placeholder="Password">
+        <button class="btn-danger" style="background: #6366f1; width: 100%;" onclick="adminLogin()">Login to Admin</button>
+    </div>
+
+    <!-- Dashboard Section -->
+    <div id="dashboard-section" class="hidden">
+        <button class="btn-danger" style="margin-bottom: 20px;" onclick="logout()">Logout</button>
+        <div id="trash-list">Loading deleted messages...</div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore, collection, getDocs, doc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getDatabase, ref as rtdbRef, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyC71rpvaFp5rhqp7oIZTZNX-U6kEy58q1w",
+        authDomain: "zixcord-by-aditya.firebaseapp.com",
+        projectId: "zixcord-by-aditya",
+        messagingSenderId: "1044879190947",
+        appId: "1:1044879190947:web:4268b70aa079fd98d04816"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const rtdb = getDatabase(app);
+
+    window.adminLogin = async () => {
+        const email = document.getElementById('admin-email').value;
+        const pass = document.getElementById('admin-password').value;
+        try {
+            await signInWithEmailAndPassword(auth, email, pass);
+        } catch (e) { alert("Login failed: " + e.message); }
+    };
+
+    window.logout = () => signOut(auth);
+
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('dashboard-section').classList.remove('hidden');
+            loadTrash();
+        } else {
+            document.getElementById('login-section').classList.remove('hidden');
+            document.getElementById('dashboard-section').classList.add('hidden');
+        }
+    });
+
+    const loadTrash = async () => {
+        const list = document.getElementById('trash-list');
+        list.innerHTML = "Fetching...";
+        try {
+            const q = query(collection(db, "admin_trash"));
+            const snaps = await getDocs(q);
+            
+            if (snaps.empty) {
+                list.innerHTML = "<p>No deleted messages found in trash.</p>";
+                return;
+            }
+
+            list.innerHTML = "";
+            snaps.forEach(docSnap => {
+                const data = docSnap.data();
+                const id = docSnap.id;
+                
+                const div = document.createElement('div');
+                div.className = 'card';
+                
+                let content = data.type === 'image' 
+                    ? `<strong>[IMAGE DELETED]</strong><br><span style="font-size: 12px; color: #94a3b8;">RTDB Key: ${data.fileUrl}</span>` 
+                    : `<strong>Text:</strong> ${data.text}`;
+
+                div.innerHTML = `
+                    <div>
+                        <div style="font-size: 12px; color: #6366f1; margin-bottom: 5px;">Deleted by: ${data.deletedByUid}</div>
+                        ${content}
+                    </div>
+                    <button class="btn-danger" onclick="destroyPermanently('${id}', '${data.type}', '${data.fileUrl || ''}')">Destroy Permanently</button>
+                `;
+                list.appendChild(div);
+            });
+        } catch (e) { list.innerHTML = "Error loading trash: " + e.message; }
+    };
+
+    window.destroyPermanently = async (docId, type, fileUrl) => {
+        if (!confirm("Are you sure? This will permanently delete this data from Firebase.")) return;
+        
+        try {
+            // 1. If it's an image, permanently delete the heavy Base64 string from Realtime Database
+            if (type === 'image' && fileUrl && fileUrl.startsWith('rtdb://')) {
+                const key = fileUrl.split('rtdb://')[1];
+                await remove(rtdbRef(rtdb, `images/${key}`));
+                console.log("Image deleted from RTDB");
+            }
+            
+            // 2. Delete the log from the Firestore Admin Trash
+            await deleteDoc(doc(db, "admin_trash", docId));
+            
+            alert("Permanently Destroyed!");
+            loadTrash(); // Reload list
+        } catch (e) {
+            alert("Error destroying: " + e.message);
+        }
+    };
+</script>
+</body>
+</html>
